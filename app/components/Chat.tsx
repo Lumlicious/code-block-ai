@@ -132,7 +132,7 @@ export function Chat() {
         <div className="p-4">
           <Button
             onClick={createNewConversation}
-            className="w-full justify-start gap-2"
+            className="w-full justify-start gap-2 cursor-pointer"
           >
             <Plus className="h-4 w-4" />
             New Chat
@@ -155,7 +155,7 @@ export function Chat() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     deleteConversation(conversation.id);
@@ -215,7 +215,7 @@ export function Chat() {
                     className="flex-1"
                     disabled={isLoading}
                   />
-                  <Button type="submit" size="icon" disabled={isLoading}>
+                  <Button type="submit" size="icon" disabled={isLoading} className="cursor-pointer">
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
@@ -229,7 +229,7 @@ export function Chat() {
               <p className="text-muted-foreground">
                 Start a new conversation or select an existing one
               </p>
-              <Button onClick={createNewConversation}>
+              <Button onClick={createNewConversation} className="cursor-pointer">
                 <Plus className="h-4 w-4 mr-2" />
                 New Chat
               </Button>
