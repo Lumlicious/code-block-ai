@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { StructuredOutputParser } from "langchain/output_parsers";
+import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { BlockResponseSchema, BlockNode, TextNode } from "@/app/types/chat";
 
-const model = new ChatGoogleGenerativeAI({
-  modelName: "gemini-2.0-flash",
-  apiKey: process.env.GOOGLE_API_KEY || "",
-});
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string | BlockNode[];
+}
 
-const parser = StructuredOutputParser.fromZodSchema(BlockResponseSchema);
+const model = new ChatGoogleGenerativeAI({
+  modelName: "gemini-1.5-pro",
+  apiKey: process.env.GOOGLE_API_KEY || "",
+  maxOutputTokens: 2048,
+  temperature: 0.7,
+  topP: 0.8,
+  topK: 40,
+});
 
 const SYSTEM_PROMPT = `You are a helpful AI assistant. Your responses must be formatted as a JSON array of content blocks, following this exact schema:
 
@@ -80,43 +87,50 @@ Example response for "Give me a paragraph with bold nouns":
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { messages } = await req.json() as { messages: ChatMessage[] };
 
-    // Convert messages to Gemini format, extracting text content from blocks
-    const history = messages.map((msg: any) => {
-      const text = Array.isArray(msg.content) 
-        ? msg.content.map((block: BlockNode) => 
-            block.data.children?.map((child: TextNode) => child.text).join('') || ''
-          ).join('\n')
-        : msg.content;
-      
-      return {
-        role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text }],
-      };
-    });
+    // Format messages for LangChain
+    const formattedMessages = [
+      new SystemMessage(SYSTEM_PROMPT),
+      ...messages.map((msg: ChatMessage) => {
+        const content = typeof msg.content === "string" 
+          ? msg.content 
+          : msg.content.map((block: BlockNode) => {
+              if (block.type === "paragraph" && block.data.children) {
+                return block.data.children.map(child => child.text).join('');
+              }
+              if (block.type === "heading") {
+                return block.data.text;
+              }
+              if (block.type === "list") {
+                return block.data.items?.map(item => 
+                  typeof item === "string" 
+                    ? item 
+                    : item.content?.map(child => child.text).join('') || ''
+                ).join('\n') || '';
+              }
+              if (block.type === "code") {
+                return block.data.code;
+              }
+              return '';
+            }).join('\n');
+        
+        return msg.role === "user" 
+          ? new HumanMessage(content)
+          : new AIMessage(content);
+      }),
+    ];
 
-    // Get the last message as the current prompt
-    const currentMessage = messages[messages.length - 1].content;
-    const promptText = Array.isArray(currentMessage)
-      ? currentMessage.map((block: BlockNode) => 
-          block.data.children?.map((child: TextNode) => child.text).join('') || ''
-        ).join('\n')
-      : currentMessage;
-
-    // Add system prompt to the beginning of the conversation
-    const fullPrompt = `${SYSTEM_PROMPT}\n\nUser: ${promptText}`;
-
-    // Get the response
-    const response = await model.invoke(fullPrompt);
-    
-    // Extract the content from the LangChain message
-    const content = response.content;
+    // Get response from the model
+    const response = await model.invoke(formattedMessages);
+    const responseContent = typeof response.content === 'string' 
+      ? response.content 
+      : JSON.stringify(response.content);
 
     // Try to parse the response as JSON
     let parsedContent;
     try {
-      parsedContent = typeof content === 'string' ? JSON.parse(content) : content;
+      parsedContent = JSON.parse(responseContent);
       if (!Array.isArray(parsedContent)) {
         throw new Error("Response is not an array");
       }
@@ -127,6 +141,7 @@ export async function POST(req: Request) {
     // Return the parsed content
     return NextResponse.json(parsedContent);
   } catch (error) {
+    console.error("Error in chat route:", error);
     return NextResponse.json({ error: "Failed to process request" }, { status: 500 });
   }
 } 
