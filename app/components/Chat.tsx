@@ -6,18 +6,17 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
 import { Plus, Send, Trash2, MessageSquare } from "lucide-react";
+import { Conversation, Message, MessageRole, BlockNode, TextNode } from "../types/chat";
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-}
+// Helper function to convert plain text to block content
+const textToBlockContent = (text: string): BlockNode[] => {
+  return [{
+    type: "paragraph",
+    data: {
+      children: [{ text }]
+    }
+  }];
+};
 
 export function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -26,11 +25,19 @@ export function Chat() {
   const [isLoading, setIsLoading] = useState(false);
 
   const createNewConversation = () => {
+    const now = new Date();
     const newConversation: Conversation = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       title: "New Chat",
       messages: [],
+      metadata: {
+        createdAt: now,
+        updatedAt: now,
+        isArchived: false,
+        isPinned: false,
+      },
     };
+    console.log('New Conversation Created:', JSON.stringify(newConversation, null, 2));
     setConversations((prev) => [newConversation, ...prev]);
     setCurrentConversation(newConversation);
   };
@@ -40,8 +47,9 @@ export function Chat() {
     if (!input.trim() || !currentConversation || isLoading) return;
 
     const newMessage: Message = {
+      id: crypto.randomUUID(),
       role: "user",
-      content: input,
+      content: textToBlockContent(input),
       timestamp: new Date(),
     };
 
@@ -49,7 +57,12 @@ export function Chat() {
       ...currentConversation,
       messages: [...currentConversation.messages, newMessage],
       title: currentConversation.messages.length === 0 ? input.slice(0, 30) + "..." : currentConversation.title,
+      metadata: {
+        ...currentConversation.metadata,
+        updatedAt: new Date(),
+      },
     };
+    console.log('After User Message:', JSON.stringify(updatedConversation, null, 2));
 
     setCurrentConversation(updatedConversation);
     setConversations((prev) =>
@@ -61,6 +74,7 @@ export function Chat() {
     setIsLoading(true);
 
     try {
+      const startTime = Date.now();
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -69,7 +83,9 @@ export function Chat() {
         body: JSON.stringify({
           messages: updatedConversation.messages.map(({ role, content }) => ({
             role,
-            content,
+            content: content.map(block => 
+              block.data.children?.map(child => child.text).join('') || ''
+            ).join('\n')
           })),
         }),
       });
@@ -79,16 +95,37 @@ export function Chat() {
       }
 
       const data = await response.json();
+      console.log('AI Response JSON:', JSON.stringify(data, null, 2));
+
+      // Ensure the response is properly formatted as BlockNode[]
+      const formattedContent: BlockNode[] = Array.isArray(data) ? data : [{
+        type: "paragraph",
+        data: {
+          children: [{ text: typeof data === 'string' ? data : JSON.stringify(data) }]
+        }
+      }];
+
       const aiResponse: Message = {
+        id: crypto.randomUUID(),
         role: "assistant",
-        content: data.content,
+        content: formattedContent,
         timestamp: new Date(),
+        metadata: {
+          model: "gemini-2.0-flash",
+          processingTime: Date.now() - startTime,
+        },
       };
 
       const conversationWithAI = {
         ...updatedConversation,
         messages: [...updatedConversation.messages, aiResponse],
+        metadata: {
+          ...updatedConversation.metadata,
+          updatedAt: new Date(),
+          totalTokens: (updatedConversation.metadata.totalTokens || 0) + (aiResponse.metadata?.tokens || 0),
+        },
       };
+      console.log('After AI Response:', JSON.stringify(conversationWithAI, null, 2));
       setCurrentConversation(conversationWithAI);
       setConversations((prev) =>
         prev.map((conv) =>
@@ -97,15 +134,22 @@ export function Chat() {
       );
     } catch (error) {
       console.error("Error:", error);
-      // Add error message to the conversation
       const errorMessage: Message = {
+        id: crypto.randomUUID(),
         role: "assistant",
-        content: "Sorry, I encountered an error. Please try again.",
+        content: textToBlockContent("Sorry, I encountered an error. Please try again."),
         timestamp: new Date(),
+        metadata: {
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
       };
       const conversationWithError = {
         ...updatedConversation,
         messages: [...updatedConversation.messages, errorMessage],
+        metadata: {
+          ...updatedConversation.metadata,
+          updatedAt: new Date(),
+        },
       };
       setCurrentConversation(conversationWithError);
       setConversations((prev) =>
@@ -186,7 +230,67 @@ export function Chat() {
                       {message.role === "user" ? "U" : "AI"}
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      {message.content.map((block, blockIndex) => (
+                        <div key={blockIndex} className="mb-4">
+                          {block.type === "code" ? (
+                            <pre className="bg-muted p-4 rounded-lg overflow-x-auto">
+                              <code className="text-sm">{block.data.code}</code>
+                            </pre>
+                          ) : block.type === "heading" ? (
+                            <h1 className={`font-bold ${block.data.level === 1 ? 'text-3xl' : 'text-2xl'} mb-2`}>
+                              {block.data.text}
+                            </h1>
+                          ) : block.type === "list" ? (
+                            <ul className={`list-${block.data.style === "numbered" ? "decimal" : "disc"} pl-6 space-y-1`}>
+                              {block.data.items?.map((item, itemIndex) => (
+                                <li key={itemIndex}>
+                                  {Array.isArray(item.content) ? (
+                                    item.content.map((child, childIndex) => (
+                                      <span
+                                        key={childIndex}
+                                        className={`
+                                          ${child.bold ? 'font-bold' : ''}
+                                          ${child.italic ? 'italic' : ''}
+                                          ${child.underline ? 'underline' : ''}
+                                          ${child.code ? 'font-mono bg-muted px-1 rounded' : ''}
+                                          ${child.strikethrough ? 'line-through' : ''}
+                                          ${child.highlight ? 'bg-yellow-200' : ''}
+                                          ${child.color ? `text-${child.color}` : ''}
+                                        `}
+                                      >
+                                        {child.text}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    typeof item === 'string' ? item : JSON.stringify(item)
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : block.data.children ? (
+                            <p className="leading-relaxed">
+                              {block.data.children.map((child, childIndex) => (
+                                <span
+                                  key={childIndex}
+                                  className={`
+                                    ${child.bold ? 'font-bold' : ''}
+                                    ${child.italic ? 'italic' : ''}
+                                    ${child.underline ? 'underline' : ''}
+                                    ${child.code ? 'font-mono bg-muted px-1 rounded' : ''}
+                                    ${child.strikethrough ? 'line-through' : ''}
+                                    ${child.highlight ? 'bg-yellow-200' : ''}
+                                    ${child.color ? `text-${child.color}` : ''}
+                                  `}
+                                >
+                                  {child.text}
+                                </span>
+                              ))}
+                            </p>
+                          ) : (
+                            <span>{block.data.code || ''}</span>
+                          )}
+                        </div>
+                      ))}
                       <span className="text-xs text-muted-foreground mt-1 block">
                         {message.timestamp.toLocaleTimeString()}
                       </span>
