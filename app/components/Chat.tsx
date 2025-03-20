@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, ReactElement } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -169,6 +169,78 @@ export function Chat() {
     }
   };
 
+  const renderBlock = (block: BlockNode): ReactElement => {
+    switch (block.type) {
+      case "code":
+        return (
+          <pre className="bg-muted p-4 rounded-lg overflow-x-auto">
+            <code>{block.data.code}</code>
+          </pre>
+        );
+      case "heading":
+        const level = block.data.level || 1;
+        const headingClass = "font-bold mt-4";
+        if (level === 1) return <h1 className={headingClass}>{block.data.text}</h1>;
+        if (level === 2) return <h2 className={headingClass}>{block.data.text}</h2>;
+        if (level === 3) return <h3 className={headingClass}>{block.data.text}</h3>;
+        if (level === 4) return <h4 className={headingClass}>{block.data.text}</h4>;
+        if (level === 5) return <h5 className={headingClass}>{block.data.text}</h5>;
+        if (level === 6) return <h6 className={headingClass}>{block.data.text}</h6>;
+        return <h1 className={headingClass}>{block.data.text}</h1>;
+      case "list":
+        const isNumbered = block.data.style === "numbered";
+        const ListComponent = isNumbered ? "ol" : "ul";
+        const listClass = isNumbered ? "list-decimal" : "list-disc";
+        return (
+          <ListComponent className={`${listClass} pl-6`}>
+            {block.data.items?.map((item, index) => (
+              <li key={index}>
+                {typeof item === "string" ? (
+                  item
+                ) : (
+                  item.content?.map((child: TextNode, childIndex: number) => (
+                    <span
+                      key={childIndex}
+                      className={`${child.bold ? "font-bold" : ""} ${
+                        child.italic ? "italic" : ""
+                      } ${child.underline ? "underline" : ""} ${
+                        child.highlight ? "bg-yellow-200" : ""
+                      } ${child.strikethrough ? "line-through" : ""} ${
+                        child.code ? "font-mono" : ""
+                      } ${child.color ? `text-${child.color}` : ""}`}
+                    >
+                      {child.text}
+                    </span>
+                  ))
+                )}
+              </li>
+            ))}
+          </ListComponent>
+        );
+      case "paragraph":
+        return (
+          <p>
+            {block.data.children?.map((child: TextNode, index: number) => (
+              <span
+                key={index}
+                className={`${child.bold ? "font-bold" : ""} ${
+                  child.italic ? "italic" : ""
+                } ${child.underline ? "underline" : ""} ${
+                  child.highlight ? "bg-yellow-200" : ""
+                } ${child.strikethrough ? "line-through" : ""} ${
+                  child.code ? "font-mono" : ""
+                } ${child.color ? `text-${child.color}` : ""}`}
+              >
+                {child.text}
+              </span>
+            ))}
+          </p>
+        );
+      default:
+        return <></>;
+    }
+  };
+
   return (
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Sidebar */}
@@ -232,63 +304,7 @@ export function Chat() {
                     <div className="flex-1">
                       {message.content.map((block, blockIndex) => (
                         <div key={blockIndex} className="mb-4">
-                          {block.type === "code" ? (
-                            <pre className="bg-muted p-4 rounded-lg overflow-x-auto">
-                              <code className="text-sm">{block.data.code}</code>
-                            </pre>
-                          ) : block.type === "heading" ? (
-                            <h1 className={`font-bold ${block.data.level === 1 ? 'text-3xl' : 'text-2xl'} mb-2`}>
-                              {block.data.text}
-                            </h1>
-                          ) : block.type === "list" ? (
-                            <ul className={`list-${block.data.style === "numbered" ? "decimal" : "disc"} pl-6 space-y-1`}>
-                              {block.data.items?.map((item, itemIndex) => (
-                                <li key={itemIndex}>
-                                  {Array.isArray(item.content) ? (
-                                    item.content.map((child, childIndex) => (
-                                      <span
-                                        key={childIndex}
-                                        className={`
-                                          ${child.bold ? 'font-bold' : ''}
-                                          ${child.italic ? 'italic' : ''}
-                                          ${child.underline ? 'underline' : ''}
-                                          ${child.code ? 'font-mono bg-muted px-1 rounded' : ''}
-                                          ${child.strikethrough ? 'line-through' : ''}
-                                          ${child.highlight ? 'bg-yellow-200' : ''}
-                                          ${child.color ? `text-${child.color}` : ''}
-                                        `}
-                                      >
-                                        {child.text}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    typeof item === 'string' ? item : JSON.stringify(item)
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : block.data.children ? (
-                            <p className="leading-relaxed">
-                              {block.data.children.map((child, childIndex) => (
-                                <span
-                                  key={childIndex}
-                                  className={`
-                                    ${child.bold ? 'font-bold' : ''}
-                                    ${child.italic ? 'italic' : ''}
-                                    ${child.underline ? 'underline' : ''}
-                                    ${child.code ? 'font-mono bg-muted px-1 rounded' : ''}
-                                    ${child.strikethrough ? 'line-through' : ''}
-                                    ${child.highlight ? 'bg-yellow-200' : ''}
-                                    ${child.color ? `text-${child.color}` : ''}
-                                  `}
-                                >
-                                  {child.text}
-                                </span>
-                              ))}
-                            </p>
-                          ) : (
-                            <span>{block.data.code || ''}</span>
-                          )}
+                          {renderBlock(block)}
                         </div>
                       ))}
                       <span className="text-xs text-muted-foreground mt-1 block">
