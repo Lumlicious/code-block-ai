@@ -63,7 +63,6 @@ export function Chat() {
         updatedAt: new Date(),
       },
     };
-    console.log('After User Message:', JSON.stringify(updatedConversation, null, 2));
 
     setCurrentConversation(updatedConversation);
     setConversations((prev) =>
@@ -76,6 +75,15 @@ export function Chat() {
 
     try {
       const startTime = Date.now();
+      console.log('Sending request to API:', {
+        messages: updatedConversation.messages.map(({ role, content }) => ({
+          role,
+          content: content.map(block => 
+            block.data.children?.map(child => child.text).join('') || ''
+          ).join('\n')
+        }))
+      });
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -92,11 +100,17 @@ export function Chat() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to get response from ChatGPT");
+        const errorData = await response.json().catch(() => ({}));
+        console.error('API Error Response:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        throw new Error(`API Error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('AI Response JSON:', JSON.stringify(data, null, 2));
+      console.log('Raw API Response:', data);
 
       // Ensure the response is properly formatted as BlockNode[]
       const formattedContent: BlockNode[] = Array.isArray(data) ? data : [{
@@ -126,7 +140,7 @@ export function Chat() {
           totalTokens: (updatedConversation.metadata.totalTokens || 0) + (aiResponse.metadata?.tokens || 0),
         },
       };
-      console.log('After AI Response:', JSON.stringify(conversationWithAI, null, 2));
+
       setCurrentConversation(conversationWithAI);
       setConversations((prev) =>
         prev.map((conv) =>
@@ -134,16 +148,26 @@ export function Chat() {
         )
       );
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Chat Error Details:", {
+        error,
+        message: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString()
+      });
+
       const errorMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: textToBlockContent("Sorry, I encountered an error. Please try again."),
+        content: textToBlockContent(
+          `Error: ${error instanceof Error ? error.message : "An unexpected error occurred"}. Please try again.`
+        ),
         timestamp: new Date(),
         metadata: {
           error: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
         },
       };
+
       const conversationWithError = {
         ...updatedConversation,
         messages: [...updatedConversation.messages, errorMessage],
@@ -152,6 +176,7 @@ export function Chat() {
           updatedAt: new Date(),
         },
       };
+
       setCurrentConversation(conversationWithError);
       setConversations((prev) =>
         prev.map((conv) =>
@@ -171,10 +196,10 @@ export function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
-      {/* Sidebar */}
-      <div className="w-64 border-r bg-muted/40">
-        <div className="p-4">
+    <div className="h-[calc(100vh-4rem)] flex overflow-hidden">
+      {/* Sidebar - Static */}
+      <div className="w-64 border-r bg-muted/40 flex flex-col">
+        <div className="p-4 border-b">
           <Button
             onClick={createNewConversation}
             className="w-full justify-start gap-2 cursor-pointer"
@@ -183,7 +208,7 @@ export function Chat() {
             New Chat
           </Button>
         </div>
-        <ScrollArea className="h-[calc(100vh-8rem)]">
+        <ScrollArea className="flex-1">
           <div className="space-y-1 p-2">
             {conversations.map((conversation) => (
               <div
@@ -214,48 +239,53 @@ export function Chat() {
         </ScrollArea>
       </div>
 
-      {/* Main Chat Area */}
+      {/* Main Chat Area - Static container with scrollable content */}
       <div className="flex-1 flex flex-col">
         {currentConversation ? (
           <>
-            <ScrollArea className="flex-1 p-4">
-              <div className="max-w-3xl mx-auto space-y-4">
-                {currentConversation.messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex gap-4 p-4 rounded-lg ${
-                      message.role === "assistant" ? "bg-muted/50" : ""
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                      {message.role === "user" ? "U" : "AI"}
+            {/* Scrollable content area */}
+            <div className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="max-w-3xl mx-auto space-y-4 p-4">
+                  {currentConversation.messages.map((message, index) => (
+                    <div
+                      key={index}
+                      className={`flex gap-4 p-4 rounded-lg ${
+                        message.role === "assistant" ? "bg-muted/50" : ""
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        {message.role === "user" ? "U" : "AI"}
+                      </div>
+                      <div className="flex-1">
+                        {message.content.map((block, blockIndex) => (
+                          <div key={blockIndex} className="mb-4">
+                            <BlockRenderer block={block} />
+                          </div>
+                        ))}
+                        <span className="text-xs text-muted-foreground mt-1 block">
+                          {message.timestamp.toLocaleTimeString()}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      {message.content.map((block, blockIndex) => (
-                        <div key={blockIndex} className="mb-4">
-                          <BlockRenderer block={block} />
-                        </div>
-                      ))}
-                      <span className="text-xs text-muted-foreground mt-1 block">
-                        {message.timestamp.toLocaleTimeString()}
-                      </span>
+                  ))}
+                  {isLoading && (
+                    <div className="flex gap-4 p-4 rounded-lg bg-muted/50">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        AI
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-muted-foreground">Thinking...</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-                {isLoading && (
-                  <div className="flex gap-4 p-4 rounded-lg bg-muted/50">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                      AI
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-muted-foreground">Thinking...</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            <div className="border-t p-4">
-              <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Static input section */}
+            <div className="border-t bg-background">
+              <form onSubmit={handleSubmit} className="max-w-3xl mx-auto p-4">
                 <div className="flex gap-2">
                   <Input
                     value={input}
